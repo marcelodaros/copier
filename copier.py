@@ -30,28 +30,36 @@ import os
 import fnmatch
 from mhl_tools import *
 import datetime
+import tkinter as tk
+from tkinter import filedialog, Text
 
 def main():
-    print("#"*10)
-    print("#### Copier V0.1 ####")
-    print("#"*10)
+    # Create window for app
+    window = tk.Tk()
+    window.title("Copier v0.1")
+    window.geometry("400x400")
 
-    orin_path = input("\nFolder de Origem: ")
-    dest_path = input("\nFolder de Destino: ")
+    button1 = tk.Button(text="Generate MHL", command=generate_mhl)
+    button1.grid(column=0, row=0)
 
+    window.mainloop()
+
+
+
+def generate_mhl():
+    files_path = filedialog.askdirectory(initialdir="/", title="Select Folder")
+    print(files_path)
     hashes = Hashes()
     mhl = Mhl()
 
     start_date = datetime.datetime.now()
 
-    files_list = hashes.hash_files(orin_path)
+    files_list = hashes.hash_files(files_path)
 
     end_date = datetime.datetime.now()
 
     creator = MhlUser("Marcelo Daros", "marcelodaros", start_date, end_date)
     
-    mhl.create_mhl(creator, files_list, orin_path)
-
-
+    mhl.create_mhl(creator, files_list, files_path)
 
 main()
