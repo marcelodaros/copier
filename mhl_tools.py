@@ -4,6 +4,8 @@ import hashlib
 import datetime
 from xml.dom.minidom import Document
 import socket
+import wx
+
 
 # MHL main class, to all MHL file tools
 class Mhl:
@@ -14,11 +16,11 @@ class Mhl:
         mhl = Document()
         # Set root and title for the root
         root = mhl.createElement("hashlist")
-        root.setAttribute("version", "1.0")
+        root.setAttribute("version", "1.1")
 
         # Create user_info element
         user_info = mhl.createElement("creatorinfo")
-        
+
         # Gets all elements in object user as a dictionary
         user_elements = user.get_all_elements()
 
@@ -64,7 +66,7 @@ class Mhl:
             item_elements = item.get_all_elements()
 
             # Creates all elements for hash element
-            file_name_t = mhl.createTextNode(item_elements["file_name"][len(orin_path):])
+            file_name_t = mhl.createTextNode(item_elements["file_name"].replace(orin_path, "")[1:])
             file_name = mhl.createElement("file")
             file_name.appendChild(file_name_t)
 
@@ -100,19 +102,19 @@ class Mhl:
 
         # Create MHL file name:
         # Name of orin_path folder + date and time
-        mhl_filename = orin_path.split("/")[-1] + datetime.datetime.now().strftime("_%Y-%m-%d_%H%M%S") + ".mhl"
+        mhl_filename = os.path.basename(orin_path) + datetime.datetime.now().strftime("_%Y-%m-%d_%H%M%S") + ".mhl"
 
         # Path to MHL file
         mhl_path = os.path.join(orin_path, mhl_filename)
-
         # Writes the file
         mhl.writexml(open(mhl_path, "w"),
-                        addindent="  ",
-                        newl="\n",
-                        encoding="UTF-8")
+                     addindent="  ",
+                     newl="\n",
+                     encoding="UTF-8")
 
         # Unlink everything to save memory
         mhl.unlink()
+
 
 # Class to store user info
 class MhlUser:
@@ -124,7 +126,7 @@ class MhlUser:
         self.__tool_name = "Copier v0.1"
         self.__start_date = start_date
         self.__finish_date = finish_date
-    
+
     def get_all_elements(self):
         """Gets all elements in object and return them as dictionary and all values as strings"""
         elements = {}
@@ -135,59 +137,74 @@ class MhlUser:
         elements["tool_name"] = self.__tool_name
         elements["start_date"] = self.__start_date.strftime("%Y-%m-%dT%H:%M:%SZ")
         elements["end_date"] = self.__finish_date.strftime("%Y-%m-%dT%H:%M:%SZ")
-        
+
         return elements
+
 
 class MhlItem:
 
     def __init__(self, file_name, file_size, last_mod_date, hash_type, hash_hex, hash_date):
         self.__file_name = file_name
         self.__file_size = file_size
-        self.__last_mod_date = datetime.datetime.fromtimestamp(last_mod_date)        
+        self.__last_mod_date = datetime.datetime.fromtimestamp(last_mod_date)
         self.__hash_type = hash_type
         self.__hash_hex = hash_hex
         self.__hash_date = hash_date
-    
+
     def get_all_elements(self):
         """Gets all elements in object and return them as dictionary and all values as strings"""
-        elements = {}
-
-        elements["file_name"] = self.__file_name
-        elements["file_size"] = str(self.__file_size)
-        elements["last_mod_date"] = self.__last_mod_date.strftime("%Y-%m-%dT%H:%M:%SZ")
-        elements["hash_type"] = self.__hash_type
-        elements["hash_hex"] = str(self.__hash_hex)
-        elements["hash_date"] = self.__hash_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+        elements = {"file_name": self.__file_name, "file_size": str(self.__file_size),
+                    "last_mod_date": self.__last_mod_date.strftime("%Y-%m-%dT%H:%M:%SZ"), "hash_type": self.__hash_type,
+                    "hash_hex": str(self.__hash_hex), "hash_date": self.__hash_date.strftime("%Y-%m-%dT%H:%M:%SZ")}
 
         return elements
+
+    @property
+    def file_name(self):
+        """Get filename"""
+        return self.__file_name
+
+    @property
+    def hash_hex(self):
+        """Get Hash"""
+        return self.__hash_hex
 
 # Class with all hashes methods
 class Hashes:
 
-    def md5(self, fname):
+    def hash(self, fname, mode, main_ui):
+        if mode == "md5":
+            return self.md5(fname, main_ui)
+        else:
+            return
+
+    def md5(self, fname, main_ui):
         """Create MD5 Hash"""
         hash_md5 = hashlib.md5()
-        print(f"Hashing file: {fname}")
 
         # Open file and start reading and hashing in chunks of 5MB
+        total = os.stat(fname).st_size
+        progress = 0
+        main_ui.pg_bar.SetValue(0)
         with open(fname, "rb") as f:
             for chunk in iter(lambda: f.read(5242880), b""):
                 hash_md5.update(chunk)
+                progress += 5242880
+                main_ui.pg_bar.SetValue((progress / total) * 100)
 
-        # Return hash as hex        
+        # Return hash as hex
         return hash_md5.hexdigest()
 
-    def hash_files(self, orin_path):
+    def hash_files(self, orin_path, hash_mode, main_ui):
         """Hashes all the files in orin_path and return a list of MhlItem"""
         itens = []
 
-        for path,dirs,files in os.walk(orin_path):
-            for f in fnmatch.filter(files,'*.*'):
-                fullname = os.path.abspath(os.path.join(path,f))
-                file_item = MhlItem(fullname, os.stat(fullname).st_size, os.path.getmtime(path), "md5", self.md5(fullname), datetime.datetime.now())
+        for path, dirs, files in os.walk(orin_path):
+            for f in fnmatch.filter(files, '*.*'):
+                fullname = os.path.abspath(os.path.join(path, f))
+                main_ui.SetStatusText(f"Hashsing {f}")
+                file_item = MhlItem(fullname, os.stat(fullname).st_size, os.path.getmtime(path), hash_mode,
+                                    self.hash(fullname, hash_mode, main_ui), datetime.datetime.now())
                 itens.append(file_item)
-        
-        print("Hashing file done!")
 
         return itens
-    

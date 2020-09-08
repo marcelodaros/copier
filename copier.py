@@ -1,65 +1,202 @@
-#########################################################################################
-#########################################################################################
-####                                 Copier V0.1                                     ####
-####                                                                                 ####
-####                                 MIT License                                     ####    
-####                                                                                 ####
-####                      Copyright (c) 2020 Marcelo Daros                           ####
-####                                                                                 ####
-####  Permission is hereby granted, free of charge, to any person obtaining a copy   ####
-####  of this software and associated documentation files (the "Software"), to deal  ####
-####  in the Software without restriction, including without limitation the rights   ####
-####  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell      ####
-####  copies of the Software, and to permit persons to whom the Software is          ####
-####  furnished to do so, subject to the following conditions:                       #### 
-####                                                                                 ####
-####  The above copyright notice and this permission notice shall be included in all ####
-####  copies or substantial portions of the Software.                                ####
-####                                                                                 ####
-####  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR     ####
-####  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,       ####
-####  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE    ####
-####  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER         ####
-####  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,  ####
-####  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE  ####
-####  SOFTWARE.                                                                      ####
-#########################################################################################
-#########################################################################################
+"""
+                                Copier V0.1a
+
+                                 MIT License
+
+                      Copyright (c) 2020 Marcelo Daros
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+"""
 
 import os
 import fnmatch
+import platform
 from mhl_tools import *
 import datetime
-import tkinter as tk
-from tkinter import filedialog, Text
+import wx
+import copier_ui
+
+
+class CopierFrame(copier_ui.MainFrame):
+    def __init__(self, parent):
+        copier_ui.MainFrame.__init__(self, parent)
+        self.SetIcon(wx.Icon("imgs/copier_icon.ico"))
+
+    def copy_thread_start(self, event):
+        import threading
+        th = threading.Thread(target=self.copy_folder, args=(event,))
+        th.start()
+
+    def verify_thread_start(self, event):
+        import threading
+        th = threading.Thread(target=self.verify_folder, args=(event,))
+        th.start()
+
+    def mhl_thread_start(self, event):
+        import threading
+        th = threading.Thread(target=self.generate_mhl, args=(event,))
+        th.start()
+
+    def copy_folder(self, event):
+        in_folder = self.in_folder.GetPath()
+        out_folder = self.out_folder.GetPath()
+
+        if os.path.basename(in_folder) != os.path.basename(out_folder):
+            out_folder = os.path.join(out_folder, os.path.basename(in_folder))
+
+        if not os.path.exists(out_folder):
+            os.mkdir(out_folder)
+        start_time = datetime.datetime.now()
+        files_count = 0
+        for path, dirs, files in os.walk(in_folder):
+            if not os.path.exists(os.path.join(out_folder, path.replace(in_folder, "")[1:])):
+                os.mkdir(os.path.join(out_folder, path.replace(in_folder, "")[1:]))
+            for f in fnmatch.filter(files, '*.*'):
+                files_count += 1
+
+        for path, dirs, files in os.walk(in_folder):
+            for f in fnmatch.filter(files, '*.*'):
+                in_fullname = os.path.abspath(os.path.join(path, f))
+                out_fullname = os.path.join(out_folder, in_fullname[len(in_folder) + 1:])
+
+                if os.path.exists(out_fullname):
+                    if os.stat(in_fullname).st_size == os.stat(out_fullname).st_size:
+                        continue
+
+                self.SetStatusText(f"Copying file {os.path.basename(in_fullname)}")
+                total = os.stat(in_fullname).st_size
+                progress = 0
+                self.pg_bar.SetValue(0)
+                out_file = open(out_fullname, "wb")
+                with open(in_fullname, "rb") as in_file:
+                    for chunk in iter(lambda: in_file.read(5242880), b""):
+                        out_file.write(chunk)
+                        progress += 5242880
+                        self.pg_bar.SetValue(int((progress / total) * 100))
+
+        self.SetStatusText("Copy done!")
+        end_time = datetime.datetime.now()
+        errors = self.check_folders(in_folder, out_folder)
+        report = ""
+        if len(errors) == 0:
+            self.SetStatusText("Folders copied and verified!")
+            wx.MessageBox("Folders successfully copied with checksum!")
+        else:
+            for err in errors:
+                report = report + err + "\n"
+            wx.MessageBox("Error copying files:\n" + report + "Check report file in Desktop.")
+            if platform != "win32" and platform != "cygwin":
+                desktop = os.path.join(os.path.join(os.path.expanduser('~')), 'Desktop')
+            else:
+                desktop = os.path.join(os.path.join(os.environ['USERPROFILE']), 'Desktop')
+            report = report + "\n\nGenerated by Copier v0.1a"
+            report_name = "Error_Report" + datetime.datetime.now().strftime("_%Y-%m-%d_%H%M%S") + ".txt"
+            report_f = open(os.path.join(desktop, report_name), "w")
+            report_f.write(report)
+            report_f.close()
+
+        print(end_time - start_time)
+
+    def check_folders(self, in_folder, out_folder):
+        hashes = Hashes()
+
+        if self.rb_md5.GetValue():
+            hash_mode = "md5"
+        else:
+            hash_mode = "xxhash"
+            wx.MessageBox("xxHash64 not implemented yet...")
+            return
+
+        files_in = hashes.hash_files(in_folder, hash_mode, self)
+        files_out = hashes.hash_files(out_folder, hash_mode, self)
+
+        errors = []
+        for file_in in files_in:
+            for file_out in files_out:
+                if file_in.file_name.replace(in_folder, "")[1:] == file_out.file_name.replace(out_folder, "")[1:]:
+                    if file_in.hash_hex != file_out.hash_hex:
+                        errors.append(file_in.file_name.replace(in_folder, "")[1:])
+                        continue
+                    else:
+                        continue
+
+        return errors
+
+    def verify_folder(self, event):
+        in_folder = self.in_folder.GetPath()
+        out_folder = self.out_folder.GetPath()
+
+        if os.path.basename(in_folder) != os.path.basename(out_folder):
+            wx.MessageBox("Base folder not the same.")
+            return
+
+        errors = self.check_folders(in_folder, out_folder)
+        report = ""
+        if len(errors) == 0:
+            self.SetStatusText("Folders verified!")
+            wx.MessageBox("Folders successfully verified!")
+        else:
+            for err in errors:
+                report = report + err + "\n"
+            wx.MessageBox("Error verifying files:\n" + report + "Check report file in Desktop.")
+            if platform != "win32" and platform != "cygwin":
+                desktop = os.path.join(os.path.join(os.path.expanduser('~')), 'Desktop')
+            else:
+                desktop = os.path.join(os.path.join(os.environ['USERPROFILE']), 'Desktop')
+            report = report + "\n\nGenerated by Copier v0.1a"
+            report_name = "Error_Report" + datetime.datetime.now().strftime("_%Y-%m-%d_%H%M%S") + ".txt"
+            report_f = open(os.path.join(desktop, report_name), "w")
+            report_f.write(report)
+            report_f.close()
+
+    def generate_mhl(self, event):
+        in_folder = self.in_folder.GetPath()
+        if in_folder == "":
+            wx.MessageBox("You need to select a Source Folder!")
+            return
+
+        if self.rb_md5.GetValue():
+            hash_mode = "md5"
+        else:
+            hash_mode = "xxhash"
+            wx.MessageBox("xxHash64 not implemented yet...")
+            return
+
+        hashes = Hashes()
+        mhl = Mhl()
+
+        start_date = datetime.datetime.now()
+        files_list = hashes.hash_files(in_folder, hash_mode, self)
+        end_date = datetime.datetime.now()
+
+        creator = MhlUser("Marcelo Daros", "marcelodaros", start_date, end_date)
+
+        mhl.create_mhl(creator, files_list, in_folder)
+
+        self.SetStatusText("MHL Created in Source Folder")
+
 
 def main():
-    # Create window for app
-    window = tk.Tk()
-    window.title("Copier v0.1")
-    window.geometry("400x400")
+    app = wx.App()
+    frm = CopierFrame(None)
+    frm.Show()
+    app.MainLoop()
 
-    button1 = tk.Button(text="Generate MHL", command=generate_mhl)
-    button1.grid(column=0, row=0)
-
-    window.mainloop()
-
-
-
-def generate_mhl():
-    files_path = filedialog.askdirectory(initialdir="/", title="Select Folder")
-    print(files_path)
-    hashes = Hashes()
-    mhl = Mhl()
-
-    start_date = datetime.datetime.now()
-
-    files_list = hashes.hash_files(files_path)
-
-    end_date = datetime.datetime.now()
-
-    creator = MhlUser("Marcelo Daros", "marcelodaros", start_date, end_date)
-    
-    mhl.create_mhl(creator, files_list, files_path)
 
 main()
