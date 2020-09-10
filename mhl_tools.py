@@ -186,11 +186,13 @@ class Hashes:
         total = os.stat(fname).st_size
         progress = 0
         main_ui.pg_bar.SetValue(0)
+        wx.Yield()
         with open(fname, "rb") as f:
             for chunk in iter(lambda: f.read(5242880), b""):
                 hash_md5.update(chunk)
                 progress += 5242880
                 main_ui.pg_bar.SetValue((progress / total) * 100)
+                wx.Yield()
 
         # Return hash as hex
         return hash_md5.hexdigest()
@@ -203,6 +205,7 @@ class Hashes:
             for f in fnmatch.filter(files, '*.*'):
                 fullname = os.path.abspath(os.path.join(path, f))
                 main_ui.SetStatusText(f"Hashsing {f}")
+                wx.Yield()
                 file_item = MhlItem(fullname, os.stat(fullname).st_size, os.path.getmtime(path), hash_mode,
                                     self.hash(fullname, hash_mode, main_ui), datetime.datetime.now())
                 itens.append(file_item)
