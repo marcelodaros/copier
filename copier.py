@@ -36,6 +36,7 @@ import wx
 
 # Define notification event for thread completion
 EVT_RESULT_ID = 100
+EVT_UPDATE_ID = 101
 
 md5 = 1000
 xxhash = 1001
@@ -50,6 +51,10 @@ def EVT_RESULT(win, func):
     """Define Result Event."""
     win.Connect(-1, -1, EVT_RESULT_ID, func)
 
+def EVT_UPDATE(win, func):
+    """Define Result Event."""
+    win.Connect(-1, -1, EVT_UPDATE_ID, func)
+
 
 class ResultEvent(wx.PyEvent):
     """Simple event to carry arbitrary result data."""
@@ -59,6 +64,18 @@ class ResultEvent(wx.PyEvent):
         wx.PyEvent.__init__(self)
         self.SetEventType(EVT_RESULT_ID)
         self.data = data
+
+
+class UpdateEvent(wx.PyEvent):
+    """Simple event to carry updates data."""
+
+    def __init__(self, fname, progress, task):
+        """Init Result Event."""
+        wx.PyEvent.__init__(self)
+        self.SetEventType(EVT_UPDATE_ID)
+        self.fname = fname
+        self.progress = progress
+        self.task = task
 
 
 class CopyThread(Thread):
@@ -265,15 +282,12 @@ class MhlThread(Thread):
 
     def run(self):
         in_folder = self._main_window.in_folder.GetPath()
-        if in_folder == "":
-            wx.MessageBox("You need to select a Source Folder!")
-            return
 
         if self._main_window.rb_md5.GetValue():
             hash_mode = "md5"
         else:
             hash_mode = "xxhash"
-            wx.MessageBox("xxHash64 not implemented yet...")
+            wx.PostEvent(self._main_window, ResultEvent(102))
             return
 
         hashes = Hashes()
@@ -292,9 +306,9 @@ class MhlThread(Thread):
 
         mhl.create_mhl(creator, files_list, in_folder)
 
-        self._main_window.SetStatusText("MHL Created in Source Folder")
-
         wx.PostEvent(self._main_window, ResultEvent(3))
+
+        return
 
     def abort(self):
         """abort worker thread."""
@@ -491,26 +505,25 @@ class Hashes:
                     return
                 hash_md5.update(chunk)
                 progress += 5242880
-                main_ui.pg_bar.SetValue((progress / total) * 100)
-                wx.Yield()
+                bar_value = int((progress / total) * 100)
+                wx.PostEvent(main_ui, UpdateEvent(fname, bar_value, "Hashing"))
 
         # Return hash as hex
         return hash_md5.hexdigest()
 
     def hash_files(self, orin_path, hash_mode, main_ui, thread):
         """Hashes all the files in orin_path and return a list of MhlItem"""
-        itens = []
+        items = []
 
         for path, dirs, files in os.walk(orin_path):
             for f in fnmatch.filter(files, '*.*'):
                 fullname = os.path.abspath(os.path.join(path, f))
-                main_ui.SetStatusText(f"Hashsing {f}")
-                wx.Yield()
+                wx.PostEvent(main_ui, UpdateEvent(f, 0, "Hashing"))
                 file_item = MhlItem(fullname, os.stat(fullname).st_size, os.path.getmtime(path), hash_mode,
                                     self.hash(fullname, hash_mode, main_ui, thread), datetime.datetime.now())
-                itens.append(file_item)
+                items.append(file_item)
 
-        return itens
+        return items
 
 
 class MainFrame(wx.Frame):
@@ -665,6 +678,7 @@ class MainFrame(wx.Frame):
 
         self.m_button5 = wx.Button(self, ID_STOP, u"Cancel", wx.DefaultPosition, wx.DefaultSize, 0)
         bSizer1.Add(self.m_button5, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL, 5)
+        self.m_button5.Disable()
 
         self.pg_bar = wx.Gauge(self, wx.ID_ANY, 100, wx.DefaultPosition, wx.DefaultSize, wx.GA_HORIZONTAL)
         self.pg_bar.SetValue(0)
@@ -685,6 +699,9 @@ class MainFrame(wx.Frame):
         # Set up event handler for any worker thread results
         EVT_RESULT(self, self.on_result)
 
+        # Set up event handler for updates for Main UI
+        EVT_UPDATE(self, self.on_update)
+
         # No threads at start
         self.thread = None
 
@@ -693,6 +710,13 @@ class MainFrame(wx.Frame):
 
     # Virtual event handlers, overide them in your derived class
     def copy_thread_start(self, event):
+        if self.in_folder.GetPath() == "" or not os.path.exists(self.in_folder.GetPath()):
+            wx.MessageBox("You have to select a valid Source Folder.")
+            return None
+        elif self.out_folder.GetPath() == "" or not os.path.exists(self.out_folder.GetPath()):
+            wx.MessageBox("You have to select a valid Destination Folder.")
+            return None
+
         if not self.thread:
             self.m_button1.Disable()
             self.m_button2.Disable()
@@ -705,6 +729,13 @@ class MainFrame(wx.Frame):
             self.thread = CopyThread(self)
 
     def verify_thread_start(self, event):
+        if self.in_folder.GetPath() == "" or not os.path.exists(self.in_folder.GetPath()):
+            wx.MessageBox("You have to select a valid Source Folder.")
+            return None
+        elif self.out_folder.GetPath() == "" or not os.path.exists(self.out_folder.GetPath()):
+            wx.MessageBox("You have to select a valid Destination Folder.")
+            return None
+
         if not self.thread:
             self.m_button1.Disable()
             self.m_button2.Disable()
@@ -717,6 +748,10 @@ class MainFrame(wx.Frame):
             self.thread = VerifyThread(self)
 
     def mhl_thread_start(self, event):
+        if self.in_folder.GetPath() == "" or not os.path.exists(self.in_folder.GetPath()):
+            wx.MessageBox("You have to select a valid Source Folder.")
+            return None
+
         if not self.thread:
             self.m_button1.Disable()
             self.m_button2.Disable()
@@ -753,9 +788,13 @@ class MainFrame(wx.Frame):
             elif event.data == 2:
                 self.SetStatusText(f"Verification completed with {mode} checksum!")
             elif event.data == 3:
+                self.SetStatusText("MHL Created in Source Folder")
                 self.SetStatusText(f"MHL created with {mode} checksum!")
             elif event.data == 101:
                 self.SetStatusText("Base folders not the same.")
+            elif event.data == 102:
+                wx.MessageBox("xxHash64 not implemented yet...")
+                self.SetStatusText("xxHash64 not yet available...")
             self.m_button1.Enable()
             self.m_button2.Enable()
             self.m_button3.Enable()
@@ -767,6 +806,14 @@ class MainFrame(wx.Frame):
             self.pg_bar.SetValue(0)
         # In either event, the worker is done
         self.thread = None
+
+    def on_update(self, event):
+        if event.fname == "":
+            self.SetStatusText(f"Start {event.task}")
+            self.pg_bar.SetValue(event.progress)
+        else:
+            self.SetStatusText(f"{event.task} file {event.fname}")
+            self.pg_bar.SetValue(event.progress)
 
     def cancel_task(self, event):
         """Stop any task."""
