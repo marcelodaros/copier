@@ -1,3 +1,4 @@
+# coding: utf-8
 """
                                 Copier V0.1a
 
@@ -33,6 +34,8 @@ import datetime
 from xml.dom.minidom import Document
 import socket
 import wx
+
+COPY_BUFSIZE = 1024 * 1024 if platform == "win32" or platform == "cygwin" else 64 * 1024
 
 # Define notification event for thread completion
 EVT_RESULT_ID = 100
@@ -119,14 +122,14 @@ class CopyThread(Thread):
                 progress = 0
                 out_file = open(out_fullname, "wb")
                 with open(in_fullname, "rb") as in_file:
-                    for chunk in iter(lambda: in_file.read(5242880), b""):
+                    for chunk in iter(lambda: in_file.read(COPY_BUFSIZE), b""):
                         if self.want_abort:
                             # Use a result of None to acknowledge the abort
                             wx.PostEvent(self._main_window, ResultEvent(None))
                             return
 
                         out_file.write(chunk)
-                        progress += 5242880
+                        progress += COPY_BUFSIZE
                         bar_value = int((progress / total) * 100)
                         wx.PostEvent(self._main_window, UpdateEvent(in_fullname, bar_value, "Copying"))
 
@@ -361,7 +364,8 @@ class Mhl:
             item_elements = item.get_all_elements()
 
             # Creates all elements for hash element
-            file_name_t = mhl.createTextNode(item_elements["file_name"].replace(orin_path, "")[1:])
+            fname = item_elements["file_name"].replace(orin_path, "")[1:]
+            file_name_t = mhl.createTextNode(fname)
             file_name = mhl.createElement("file")
             file_name.appendChild(file_name_t)
 
@@ -402,7 +406,7 @@ class Mhl:
         # Path to MHL file
         mhl_path = os.path.join(orin_path, mhl_filename)
         # Writes the file
-        mhl.writexml(open(mhl_path, "w"),
+        mhl.writexml(open(mhl_path, "w", encoding="utf-8", errors="xmlcharrefreplace"),
                      addindent="  ",
                      newl="\n",
                      encoding="UTF-8")
@@ -482,14 +486,14 @@ class Hashes:
         total = os.stat(fname).st_size
         progress = 0
         with open(fname, "rb") as f:
-            for chunk in iter(lambda: f.read(5242880), b""):
+            for chunk in iter(lambda: f.read(COPY_BUFSIZE), b""):
                 if thread.want_abort:
                     # Use a result of None to acknowledge the abort
                     wx.PostEvent(main_ui, ResultEvent(None))
                     return
 
                 hash_md5.update(chunk)
-                progress += 5242880
+                progress += COPY_BUFSIZE
                 bar_value = int((progress / total) * 100)
                 wx.PostEvent(main_ui, UpdateEvent(fname, bar_value, "Hashing"))
 
