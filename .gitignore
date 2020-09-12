@@ -3,3 +3,6 @@ __pycache__
 docs
 copier_ui.fbp
 .idea
+build
+dist
+copier.spec
