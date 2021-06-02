@@ -4,7 +4,6 @@ import hashlib
 import datetime
 from xml.dom.minidom import Document
 import socket
-import wx
 
 
 # MHL main class, to all MHL file tools
